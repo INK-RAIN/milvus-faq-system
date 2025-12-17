@@ -1,0 +1,1 @@
+/home/user/ENVIRONMENT_MEMORY.md

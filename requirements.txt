@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+llama-index
+llama-index-vector-stores-milvus
+llama-index-embeddings-huggingface
+pymilvus>=2.3.0
+python-multipart
+torch
+transformers

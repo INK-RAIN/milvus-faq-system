@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FAQ 智能助手</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <style>
+        .chat-container {
+            height: calc(100vh - 180px);
+        }
+    </style>
+</head>
+<body class="bg-gray-100 h-screen flex flex-col items-center p-4">
+
+    <div id="app" class="w-full max-w-2xl bg-white rounded-lg shadow-lg overflow-hidden flex flex-col h-full">
+        <!-- Header -->
+        <header class="bg-blue-600 text-white p-4 flex justify-between items-center">
+            <h1 class="text-xl font-bold">FAQ 智能助手</h1>
+            <div class="text-sm">
+                <span :class="serverStatus === 'Connected' ? 'text-green-200' : 'text-red-200'">●</span> {{ serverStatus }}
+            </div>
+        </header>
+
+        <!-- Chat Area -->
+        <div class="flex-1 p-4 overflow-y-auto chat-container bg-gray-50" ref="chatContainer">
+            <div v-if="messages.length === 0" class="text-center text-gray-400 mt-10">
+                <p>你好！有什么可以帮你的吗？</p>
+                <p class="text-sm mt-2">试着问我：如何退货？</p>
+            </div>
+
+            <div v-for="(msg, index) in messages" :key="index" class="mb-4">
+                <!-- User Message -->
+                <div v-if="msg.role === 'user'" class="flex justify-end">
+                    <div class="bg-blue-500 text-white px-4 py-2 rounded-lg rounded-tr-none max-w-[80%] shadow-sm">
+                        {{ msg.content }}
+                    </div>
+                </div>
+
+                <!-- System Message -->
+                <div v-else class="flex justify-start">
+                    <div class="bg-white border border-gray-200 text-gray-800 px-4 py-2 rounded-lg rounded-tl-none max-w-[80%] shadow-sm">
+                        <div class="font-medium mb-1">{{ msg.question }}</div>
+                        <div class="text-gray-700 whitespace-pre-wrap">{{ msg.answer }}</div>
+                        <div class="mt-2 pt-2 border-t border-gray-100 flex justify-between items-center text-xs text-gray-500">
+                            <span>置信度: <span :class="getScoreClass(msg.score)">{{ (msg.score * 100).toFixed(2) }}%</span></span>
+                            <span v-if="msg.retrieved_question" class="italic ml-2" title="匹配到的原问题">匹配: {{ msg.retrieved_question }}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div v-if="loading" class="flex justify-start mb-4">
+                <div class="bg-gray-200 text-gray-500 px-4 py-2 rounded-lg rounded-tl-none text-sm animate-pulse">
+                    正在思考...
+                </div>
+            </div>
+        </div>
+
+        <!-- Input Area -->
+        <div class="p-4 bg-white border-t border-gray-200">
+            <div class="flex gap-2">
+                <input 
+                    v-model="inputQuery" 
+                    @keyup.enter="search"
+                    type="text" 
+                    placeholder="输入你的问题..." 
+                    class="flex-1 border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    :disabled="loading"
+                >
+                <button 
+                    @click="search" 
+                    class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                    :disabled="loading || !inputQuery.trim()"
+                >
+                    发送
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { createApp, ref, onMounted, nextTick } = Vue;
+
+        createApp({
+            setup() {
+                const messages = ref([]);
+                const inputQuery = ref('');
+                const loading = ref(false);
+                const chatContainer = ref(null);
+                const serverStatus = ref('Checking...');
+
+                const scrollToBottom = async () => {
+                    await nextTick();
+                    if (chatContainer.value) {
+                        chatContainer.value.scrollTop = chatContainer.value.scrollHeight;
+                    }
+                };
+
+                const checkHealth = async () => {
+                    try {
+                        const res = await fetch('/health');
+                        if (res.ok) {
+                            serverStatus.value = 'Connected';
+                        } else {
+                            serverStatus.value = 'Error';
+                        }
+                    } catch (e) {
+                        serverStatus.value = 'Disconnected';
+                    }
+                };
+
+                const getScoreClass = (score) => {
+                    if (score > 0.7) return 'text-green-600 font-bold';
+                    if (score > 0.4) return 'text-yellow-600 font-bold';
+                    return 'text-red-600 font-bold';
+                };
+
+                const search = async () => {
+                    const query = inputQuery.value.trim();
+                    if (!query || loading.value) return;
+
+                    // Add user message
+                    messages.value.push({
+                        role: 'user',
+                        content: query
+                    });
+                    inputQuery.value = '';
+                    loading.value = true;
+                    scrollToBottom();
+
+                    try {
+                        const res = await fetch('/search', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                query: query,
+                                top_k: 1 // 只取最相关的一条
+                            })
+                        });
+
+                        if (!res.ok) throw new Error('Network response was not ok');
+
+                        const data = await res.json();
+                        
+                        if (data && data.length > 0) {
+                            const result = data[0];
+                            messages.value.push({
+                                role: 'system',
+                                question: query, // 用户的问题
+                                answer: result.answer,
+                                retrieved_question: result.question, // 库里的问题
+                                score: result.score
+                            });
+                        } else {
+                            messages.value.push({
+                                role: 'system',
+                                question: query,
+                                answer: "抱歉，我没有找到相关的答案。",
+                                score: 0,
+                                retrieved_question: null
+                            });
+                        }
+
+                    } catch (error) {
+                        console.error('Error:', error);
+                        messages.value.push({
+                            role: 'system',
+                            question: query,
+                            answer: "系统发生错误，请稍后再试。",
+                            score: 0,
+                            retrieved_question: null
+                        });
+                    } finally {
+                        loading.value = false;
+                        scrollToBottom();
+                    }
+                };
+
+                onMounted(() => {
+                    checkHealth();
+                });
+
+                return {
+                    messages,
+                    inputQuery,
+                    loading,
+                    chatContainer,
+                    serverStatus,
+                    search,
+                    getScoreClass
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
