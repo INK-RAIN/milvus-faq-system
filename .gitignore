@@ -8,3 +8,4 @@ venv/
 .vscode/
 *.swp
 *.swo
+ENVIRONMENT_MEMORY.md
